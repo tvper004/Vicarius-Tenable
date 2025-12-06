@@ -9,8 +9,6 @@ services:
       dockerfile: Dockerfile
     restart: always
 
-    ports:
-      - "5433:5432"
     environment:
       POSTGRES_DB_FILE: /run/secrets/postgres_db
       POSTGRES_USER_FILE: /run/secrets/postgres_user
