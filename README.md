@@ -1,8 +1,31 @@
 # vAnalyzer
 
+## 🚀 Deployment Options
 
+vAnalyzer can be deployed in two ways:
 
-# vAnalyzer Setup Instructions
+### Option 1: Easypanel Deployment (Recommended for Cloud)
+
+**✨ Quick and easy deployment using Easypanel's Docker Compose support.**
+
+For detailed instructions on deploying vAnalyzer to Easypanel, see:
+
+📖 **[EASYPANEL_DEPLOYMENT.md](./EASYPANEL_DEPLOYMENT.md)**
+
+**Key Features:**
+- ✅ No Docker Swarm secrets required
+- ✅ Simple environment variable configuration
+- ✅ Automatic SSL/TLS with custom domains
+- ✅ Built-in monitoring and logging
+- ✅ One-click deployments from Git
+
+### Option 2: Traditional Docker Swarm Deployment
+
+For on-premise or self-hosted deployments using Docker Swarm, follow the instructions below.
+
+---
+
+# vAnalyzer Setup Instructions (Docker Swarm)
 
 ### Prerequisites
 

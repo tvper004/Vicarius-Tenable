@@ -1,41 +1,32 @@
 
-
 services:
 
   appdb:
-    # image: 127.0.0.1:5000/vrx-reports-appdb:latest # Removed registry image
     build:
       context: ./appdb
       dockerfile: Dockerfile
     restart: always
-
     environment:
-      POSTGRES_DB_FILE: /run/secrets/postgres_db
-      POSTGRES_USER_FILE: /run/secrets/postgres_user
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-#    labels:
-#      - "traefik.http.routers.metabasereports.entrypoints=web,websecure"
-#      - "traefik.http.routers.metabase.rule=Host(`db.example.com`)"
-#      - "traefik.http.routers.metabase.tls=true"
-#      - "traefik.http.routers.metabase.tls.certresolver=prod"
+      # Database configuration via environment variables
+      POSTGRES_DB: ${POSTGRES_DB:-vanalyzer}
+      POSTGRES_USER: ${POSTGRES_USER:-vanalyzer_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - vicarius-network
-    secrets:
-      - postgres_db
-      - postgres_user
-      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vanalyzer_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
-    # image: 127.0.0.1:5000/vrx-reports-app:latest # Removed registry image
     build:
       context: ./app
       dockerfile: Dockerfile
     restart: always
-#    labels:
-#      - "traefik.enabled=false"
     volumes:
       - ./app/reports:/usr/src/app/reports
       - ./app/logs:/var/log
@@ -44,51 +35,55 @@ services:
     networks:
       - vicarius-network
     depends_on:
-      - appdb
-      - metabase
-    secrets:
-      - api_key
-      - dashboard_id
-      - postgres_db
-      - postgres_user
-      - postgres_password
-      - optional_tools
+      appdb:
+        condition: service_healthy
+      metabase:
+        condition: service_started
     environment:
-      # Environment Variables for Easypanel / Testing
-      # These take precedence over secrets if set
-      - VICARIUS_API_KEY=
-      - VICARIUS_DASHBOARD_ID=
-      - POSTGRES_DB=
-      - POSTGRES_USER=
-      - POSTGRES_PASSWORD=
-      - TENABLE_API_KEY=
-      - TENABLE_SECRET_KEY=
-      - OPTIONAL_TOOLS=
+      # Vicarius API Configuration
+      VICARIUS_API_KEY: ${VICARIUS_API_KEY}
+      VICARIUS_DASHBOARD_ID: ${VICARIUS_DASHBOARD_ID}
+      
+      # Tenable API Configuration
+      TENABLE_API_KEY: ${TENABLE_API_KEY}
+      TENABLE_SECRET_KEY: ${TENABLE_SECRET_KEY}
+      
+      # Database Configuration
+      POSTGRES_DB: ${POSTGRES_DB:-vanalyzer}
+      POSTGRES_USER: ${POSTGRES_USER:-vanalyzer_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: appdb
+      POSTGRES_PORT: 5432
+      
+      # Optional Tools
+      OPTIONAL_TOOLS: ${OPTIONAL_TOOLS:-}
 
   metabase:
     image: metabase/metabase:latest
+    restart: always
     depends_on:
-      - appdb
+      appdb:
+        condition: service_healthy
     hostname: metabase
     volumes:
       - metabase-data:/metabase-data
       - /etc/localtime:/etc/localtime:ro
     environment:
+      # Metabase Database Configuration
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabase
       MB_DB_PORT: 5432
-      MB_DB_USER_FILE: /run/secrets/postgres_user
-      MB_DB_PASS_FILE: /run/secrets/postgres_password
+      MB_DB_USER: ${POSTGRES_USER:-vanalyzer_user}
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
       MB_DB_HOST: appdb
     networks:
       - vicarius-network
-    secrets:
-      - postgres_user
-      - postgres_password
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   postgres-data:
@@ -97,18 +92,3 @@ volumes:
 networks:
   vicarius-network:
     attachable: true
-
-
-secrets:
-  api_key:
-    external: true
-  dashboard_id:
-    external: true
-  postgres_db:
-    external: true
-  postgres_user:
-    external: true
-  postgres_password:
-    external: true
-  optional_tools:
-    external: true
