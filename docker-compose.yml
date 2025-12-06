@@ -66,6 +66,8 @@ services:
       appdb:
         condition: service_healthy
     hostname: metabase
+    ports:
+      - "3030:3000"
     volumes:
       - metabase-data:/metabase-data
       - /etc/localtime:/etc/localtime:ro
@@ -77,6 +79,8 @@ services:
       MB_DB_USER: ${POSTGRES_USER:-vicarius_user}
       MB_DB_PASS: ${POSTGRES_PASSWORD}
       MB_DB_HOST: appdb
+      # Configuración de puerto
+      MB_JETTY_PORT: 3000
     networks:
       - vicarius-network
     healthcheck:
