@@ -1,19 +1,46 @@
 #!/bin/bash
 set -e
 
-# Este script se ejecuta automáticamente cuando PostgreSQL se inicia por primera vez
-# Crea las bases de datos necesarias para vAnalyzer y Metabase
+# Script de inicialización robusto para PostgreSQL
+# Se ejecuta automáticamente en el primer inicio del contenedor
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-    -- Crear base de datos para Metabase si no existe
-    SELECT 'CREATE DATABASE metabase'
+echo "🔧 Iniciando configuración de PostgreSQL..."
+
+# Usar el usuario postgres por defecto para operaciones administrativas
+ADMIN_USER="${POSTGRES_USER:-postgres}"
+MAIN_DB="${POSTGRES_DB:-vanalyzer}"
+
+# Ejecutar comandos SQL
+psql -v ON_ERROR_STOP=0 --username "$ADMIN_USER" --dbname "postgres" <<-EOSQL
+    -- Crear usuario vanalyzer_user si no existe
+    DO \$\$
+    BEGIN
+        IF NOT EXISTS (SELECT FROM pg_user WHERE usename = 'vanalyzer_user') THEN
+            CREATE USER vanalyzer_user WITH PASSWORD '${POSTGRES_PASSWORD}';
+            ALTER USER vanalyzer_user WITH SUPERUSER;
+            RAISE NOTICE 'Usuario vanalyzer_user creado';
+        ELSE
+            RAISE NOTICE 'Usuario vanalyzer_user ya existe';
+        END IF;
+    END
+    \$\$;
+
+    -- Crear base de datos vanalyzer si no existe
+    SELECT 'CREATE DATABASE vanalyzer OWNER vanalyzer_user'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'vanalyzer')\gexec
+
+    -- Crear base de datos metabase si no existe
+    SELECT 'CREATE DATABASE metabase OWNER vanalyzer_user'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metabase')\gexec
 
-    -- Otorgar permisos al usuario en la base de datos metabase
-    GRANT ALL PRIVILEGES ON DATABASE metabase TO "$POSTGRES_USER";
-
-    -- Mensaje de confirmación
-    \echo 'Bases de datos inicializadas correctamente'
+    -- Otorgar todos los permisos
+    GRANT ALL PRIVILEGES ON DATABASE vanalyzer TO vanalyzer_user;
+    GRANT ALL PRIVILEGES ON DATABASE metabase TO vanalyzer_user;
 EOSQL
 
-echo "✅ Inicialización de bases de datos completada"
+echo "✅ Configuración de PostgreSQL completada"
+echo "📊 Bases de datos disponibles:"
+
+# Listar bases de datos
+psql -v ON_ERROR_STOP=0 --username "$ADMIN_USER" --dbname "postgres" -c "\l"
+
