@@ -3228,18 +3228,19 @@ def create_view_unified_assets(host, port, user, password, database):
         SELECT 
             COALESCE(
                 LOWER(TRIM(endpoint_name)), 
-                LOWER(TRIM(endpoint_ip)), 
+                LOWER(TRIM(endpoint_hash)), 
                 'unknown'
             ) AS unified_asset_id,
             'Vicarius' AS source,
             endpoint_hash AS source_id,
             endpoint_name AS hostname,
-            endpoint_ip AS ip_address,
+            NULL AS ip_address,
             operating_system_name AS operating_system,
             NULL AS last_seen,
-            created_at,
-            updated_at
+            CURRENT_TIMESTAMP AS created_at,
+            CURRENT_TIMESTAMP AS updated_at
         FROM endpoints
+
         
         UNION ALL
         
