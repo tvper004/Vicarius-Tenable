@@ -2956,3 +2956,337 @@ def clean_table_groups(host, port, user, password, database):
     # Fechar conexão
     cur.close()
     conn.close()
+
+# ==============================================================================
+# Tenable.io Integration Functions
+# ==============================================================================
+
+def check_create_table_tenable_assets(host, port, user, password, database):
+    """
+    Crea la tabla tenable_assets si no existe.
+    Almacena información de activos/endpoints desde Tenable.io
+    """
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cur = conn.cursor()
+        
+        # Crear tabla si no existe
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS tenable_assets (
+            asset_uuid VARCHAR(255) PRIMARY KEY,
+            hostname VARCHAR(255),
+            ip_address VARCHAR(50),
+            operating_system VARCHAR(255),
+            last_seen VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        -- Crear índices para mejorar el rendimiento
+        CREATE INDEX IF NOT EXISTS idx_tenable_assets_hostname 
+            ON tenable_assets(hostname);
+        CREATE INDEX IF NOT EXISTS idx_tenable_assets_ip 
+            ON tenable_assets(ip_address);
+        """
+        
+        cur.execute(create_table_query)
+        conn.commit()
+        
+        print("✅ Tabla 'tenable_assets' verificada/creada exitosamente")
+        
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ Error al crear tabla tenable_assets: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise
+
+
+def check_create_table_tenable_vulnerabilities(host, port, user, password, database):
+    """
+    Crea la tabla tenable_vulnerabilities si no existe.
+    Almacena vulnerabilidades detectadas por Tenable.io
+    """
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cur = conn.cursor()
+        
+        # Crear tabla si no existe
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS tenable_vulnerabilities (
+            id SERIAL PRIMARY KEY,
+            asset_uuid VARCHAR(255),
+            plugin_id VARCHAR(50),
+            cve VARCHAR(50),
+            cvss FLOAT,
+            severity VARCHAR(20),
+            vulnerability_name TEXT,
+            first_found VARCHAR(50),
+            last_found VARCHAR(50),
+            state VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (asset_uuid) REFERENCES tenable_assets(asset_uuid) ON DELETE CASCADE
+        );
+        
+        -- Crear índices para mejorar el rendimiento
+        CREATE INDEX IF NOT EXISTS idx_tenable_vulns_asset 
+            ON tenable_vulnerabilities(asset_uuid);
+        CREATE INDEX IF NOT EXISTS idx_tenable_vulns_cve 
+            ON tenable_vulnerabilities(cve);
+        CREATE INDEX IF NOT EXISTS idx_tenable_vulns_severity 
+            ON tenable_vulnerabilities(severity);
+        CREATE INDEX IF NOT EXISTS idx_tenable_vulns_plugin 
+            ON tenable_vulnerabilities(plugin_id);
+        
+        -- Crear índice único compuesto para evitar duplicados
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tenable_vulns_unique 
+            ON tenable_vulnerabilities(asset_uuid, plugin_id, cve);
+        """
+        
+        cur.execute(create_table_query)
+        conn.commit()
+        
+        print("✅ Tabla 'tenable_vulnerabilities' verificada/creada exitosamente")
+        
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ Error al crear tabla tenable_vulnerabilities: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise
+
+
+def insert_into_table_tenable_assets(assets_data, host, port, user, password, database):
+    """
+    Inserta o actualiza activos de Tenable en la base de datos.
+    Usa UPSERT (INSERT ... ON CONFLICT) para evitar duplicados.
+    """
+    if not assets_data or len(assets_data) == 0:
+        print("⚠️  No hay datos de activos para insertar")
+        return
+    
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cur = conn.cursor()
+        
+        # Query con UPSERT para actualizar si ya existe
+        insert_query = """
+        INSERT INTO tenable_assets 
+            (asset_uuid, hostname, ip_address, operating_system, last_seen, updated_at)
+        VALUES 
+            (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (asset_uuid) 
+        DO UPDATE SET
+            hostname = EXCLUDED.hostname,
+            ip_address = EXCLUDED.ip_address,
+            operating_system = EXCLUDED.operating_system,
+            last_seen = EXCLUDED.last_seen,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        
+        inserted_count = 0
+        for asset in assets_data:
+            try:
+                cur.execute(insert_query, (
+                    asset.get('asset_uuid'),
+                    asset.get('hostname'),
+                    asset.get('ip_address'),
+                    asset.get('operating_system'),
+                    asset.get('last_seen')
+                ))
+                inserted_count += 1
+            except Exception as e:
+                print(f"⚠️  Error insertando activo {asset.get('asset_uuid')}: {e}")
+                continue
+        
+        conn.commit()
+        print(f"✅ Insertados/actualizados {inserted_count} activos de Tenable")
+        
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ Error al insertar activos de Tenable: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise
+
+
+def insert_into_table_tenable_vulnerabilities(vulns_data, host, port, user, password, database):
+    """
+    Inserta o actualiza vulnerabilidades de Tenable en la base de datos.
+    Usa UPSERT para evitar duplicados basándose en asset_uuid + plugin_id + cve.
+    """
+    if not vulns_data or len(vulns_data) == 0:
+        print("⚠️  No hay datos de vulnerabilidades para insertar")
+        return
+    
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cur = conn.cursor()
+        
+        # Query con UPSERT
+        insert_query = """
+        INSERT INTO tenable_vulnerabilities 
+            (asset_uuid, plugin_id, cve, cvss, severity, vulnerability_name, 
+             first_found, last_found, state, updated_at)
+        VALUES 
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT ON CONSTRAINT idx_tenable_vulns_unique
+        DO UPDATE SET
+            cvss = EXCLUDED.cvss,
+            severity = EXCLUDED.severity,
+            vulnerability_name = EXCLUDED.vulnerability_name,
+            last_found = EXCLUDED.last_found,
+            state = EXCLUDED.state,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+        
+        inserted_count = 0
+        for vuln in vulns_data:
+            try:
+                cur.execute(insert_query, (
+                    vuln.get('asset_uuid'),
+                    vuln.get('plugin_id'),
+                    vuln.get('cve', 'N/A'),
+                    vuln.get('cvss'),
+                    vuln.get('severity'),
+                    vuln.get('vulnerability_name'),
+                    vuln.get('first_found'),
+                    vuln.get('last_found'),
+                    vuln.get('state')
+                ))
+                inserted_count += 1
+            except Exception as e:
+                print(f"⚠️  Error insertando vulnerabilidad {vuln.get('cve')}: {e}")
+                continue
+        
+        conn.commit()
+        print(f"✅ Insertadas/actualizadas {inserted_count} vulnerabilidades de Tenable")
+        
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ Error al insertar vulnerabilidades de Tenable: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise
+
+
+def create_view_unified_assets(host, port, user, password, database):
+    """
+    Crea o reemplaza la vista unified_assets_view que combina activos
+    de Vicarius y Tenable en una sola vista.
+    """
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database
+        )
+        cur = conn.cursor()
+        
+        # Crear o reemplazar la vista
+        create_view_query = """
+        CREATE OR REPLACE VIEW unified_assets_view AS
+        SELECT 
+            COALESCE(
+                LOWER(TRIM(endpoint_name)), 
+                LOWER(TRIM(endpoint_ip)), 
+                'unknown'
+            ) AS unified_asset_id,
+            'Vicarius' AS source,
+            endpoint_hash AS source_id,
+            endpoint_name AS hostname,
+            endpoint_ip AS ip_address,
+            operating_system_name AS operating_system,
+            NULL AS last_seen,
+            created_at,
+            updated_at
+        FROM endpoints
+        
+        UNION ALL
+        
+        SELECT 
+            COALESCE(
+                LOWER(TRIM(hostname)), 
+                LOWER(TRIM(ip_address)), 
+                'unknown'
+            ) AS unified_asset_id,
+            'Tenable' AS source,
+            asset_uuid AS source_id,
+            hostname,
+            ip_address,
+            operating_system,
+            last_seen,
+            created_at,
+            updated_at
+        FROM tenable_assets;
+        """
+        
+        cur.execute(create_view_query)
+        conn.commit()
+        
+        print("✅ Vista 'unified_assets_view' creada/actualizada exitosamente")
+        
+        # Opcional: Mostrar estadísticas
+        cur.execute("""
+            SELECT 
+                source,
+                COUNT(*) as total_assets
+            FROM unified_assets_view
+            GROUP BY source
+            ORDER BY source;
+        """)
+        
+        stats = cur.fetchall()
+        if stats:
+            print("\n📊 Estadísticas de Activos Unificados:")
+            for row in stats:
+                print(f"   - {row[0]}: {row[1]} activos")
+        
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ Error al crear vista unificada: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise
